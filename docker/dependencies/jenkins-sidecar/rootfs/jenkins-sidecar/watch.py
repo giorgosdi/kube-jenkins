@@ -103,6 +103,7 @@ class Job:
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
 
+        # formatted_name has spaces converted to underscores
         self.formatted_name = self.generate_formatted_name()
         self.kube_job_path = self.generate_kube_job_path()
 
@@ -132,20 +133,23 @@ class Job:
         #    xml_run_command.append("cd {0}".format(self.workdir))
         # xml_run_command.append(self.run_command)
 
-        logging.debug("Generated Jenkins job spec for '{}'".format(self.name))
+        logging.debug("Generated Jenkins job spec for '{name}'".format(name=self.formatted_name))
         # return jenkins_xml_template.format(run_command="\n".join(xml_run_command))
         return jenkins_xml_template.format(jenkins_command=self.generate_jenkins_command())
 
-    def save_jenkins_xml(self, jenkins_xml):
-        # jenkins_xml = self.generated_jenkins_xml
-        directory = self.name
+    def save_jenkins_xml(self):
+        jenkins_xml = self.generated_jenkins_xml
+        directory = self.formatted_name
         jenkins_job_filename = "{dir}/config.xml".format(dir=directory)
         full_output_path = "{root_path}{sep}{filename}".format(
             root_path=self.job_directory,
             sep=os.sep,
             filename=jenkins_job_filename,
         )
-        logging.debug("Jenkins job output path is '{path}'".format(path=full_output_path))
+        # logging.debug("Jenkins job output path for '{name}' is '{path}'".format(
+        #     name=self.formatted_name,
+        #     path=full_output_path,
+        # ))
 
         directory_to_use = "{root_path}{sep}{dir}".format(root_path=self.job_directory, sep=os.sep, dir=directory)
         if not os.path.exists(directory_to_use):
@@ -153,7 +157,10 @@ class Job:
             os.makedirs("{root_path}{sep}{dir}".format(root_path=self.job_directory, sep=os.sep, dir=directory))
 
         with open(full_output_path, 'w') as fp:
-            logging.debug("Writing Jenkins XML to '{path}'".format(path=full_output_path))
+            logging.debug("Writing Jenkins XML for '{name}' to '{path}'".format(
+                name=self.formatted_name,
+                path=full_output_path,
+            ))
             fp.write(jenkins_xml)
 
     def generate_kubernetes_job(self):
@@ -167,7 +174,8 @@ class Job:
         # print(job_spec)
         return job_spec
 
-    def save_kubernetes_job(self, job_spec):
+    def save_kubernetes_job(self):
+        job_spec = self.generated_kubernetes_job
         # v1_batch.create_namespaced_job(self.namespace, job_spec)
         # directory = self.name
         # jenkins_job_filename = "{dir}/job.xml".format(dir=directory)
@@ -177,7 +185,10 @@ class Job:
             sep=os.sep,
             filename=self.kube_job_path,
         )
-        logging.debug("Kubernetes job output path is '{path}'".format(path=full_output_path))
+        # logging.debug("Kubernetes job output path for '{name}' is '{path}'".format(
+        #     name=self.formatted_name,
+        #     path=full_output_path,
+        # ))
 
         # directory_to_use = "{root_path}/{dir}".format(root_path=self.job_directory, dir=directory)
         # if not os.path.exists(directory_to_use):
@@ -185,7 +196,10 @@ class Job:
         #     os.makedirs("{root_path}/{dir}".format(root_path=self.job_directory, dir=directory))
 
         with open(full_output_path, 'w') as fp:
-            logging.debug("Writing Kubernetes job to '{path}'".format(path=full_output_path))
+            logging.debug("Writing Kubernetes job for '{name}' to '{path}'".format(
+                name=self.formatted_name,
+                path=full_output_path,
+            ))
             fp.write(job_spec)
 
 
@@ -200,13 +214,13 @@ def run_cleanup(directory, list_of_current_jobs):
 
             filename, extension = os.path.splitext(file)
             if filename not in list_of_current_jobs:
-                logging.debug("Removing '{path}'".format(path=full_path))
+                logging.debug("Removing file '{path}'".format(path=full_path))
                 os.unlink(full_path)
         for directory in dirs:
             # print("dir: {directory}".format(directory=directory))
             full_dir_path = "{subdir}{sep}{directory}".format(subdir=subdir, sep=os.sep, directory=directory)
             if directory not in list_of_current_jobs:
-                logging.debug("Recursively removing '{path}'".format(path=full_dir_path))
+                logging.debug("Recursively removing directory '{path}'".format(path=full_dir_path))
                 shutil.rmtree(full_dir_path)
 
 
@@ -216,8 +230,8 @@ def parse_job_config(job_config):
     for job_dict in yaml_config:
         # print(Job(job_dict).generated_jenkins_xml)
         this_job = Job(job_dict, jenkins_job_directory)
-        this_job.save_jenkins_xml(this_job.generated_jenkins_xml)
-        this_job.save_kubernetes_job(this_job.generated_kubernetes_job)
+        this_job.save_jenkins_xml()
+        this_job.save_kubernetes_job()
         created_jobs.append(this_job.formatted_name)
     run_cleanup(jenkins_job_directory, created_jobs)
 
