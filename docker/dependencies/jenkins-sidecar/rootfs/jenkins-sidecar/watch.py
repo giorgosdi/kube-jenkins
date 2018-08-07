@@ -119,9 +119,6 @@ class Job:
     def generate_kube_job_path(self):
         return "{name}.yaml".format(name=self.name.replace(' ', '_'))
 
-    def get_jenkins_xml(self):
-        return self.generated_jenkins_xml
-
     def generate_jenkins_command(self):
         return "kubectl apply -f {dir}{sep}{job_path}".format(
             dir=self.job_directory,
@@ -140,7 +137,7 @@ class Job:
         return jenkins_xml_template.format(jenkins_command=self.generate_jenkins_command())
 
     def save_jenkins_xml(self, jenkins_xml):
-        # jenkins_xml = self.get_jenkins_xml()
+        # jenkins_xml = self.generated_jenkins_xml
         directory = self.name
         jenkins_job_filename = "{dir}/config.xml".format(dir=directory)
         full_output_path = "{root_path}{sep}{filename}".format(
@@ -158,9 +155,6 @@ class Job:
         with open(full_output_path, 'w') as fp:
             logging.debug("Writing Jenkins XML to '{path}'".format(path=full_output_path))
             fp.write(jenkins_xml)
-
-    def get_kubernetes_job(self):
-        return self.generated_kubernetes_job
 
     def generate_kubernetes_job(self):
         args = "cd {workdir} && {command}".format(workdir=self.workdir, command=self.run_command)
@@ -220,10 +214,10 @@ def parse_job_config(job_config):
     yaml_config = yaml.load(job_config)
     created_jobs = []
     for job_dict in yaml_config:
-        # print(Job(job_dict).get_jenkins_xml())
+        # print(Job(job_dict).generated_jenkins_xml)
         this_job = Job(job_dict, jenkins_job_directory)
-        this_job.save_jenkins_xml(this_job.get_jenkins_xml())
-        this_job.save_kubernetes_job(this_job.get_kubernetes_job())
+        this_job.save_jenkins_xml(this_job.generated_jenkins_xml)
+        this_job.save_kubernetes_job(this_job.generated_kubernetes_job)
         created_jobs.append(this_job.formatted_name)
     run_cleanup(jenkins_job_directory, created_jobs)
 
