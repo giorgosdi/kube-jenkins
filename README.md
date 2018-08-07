@@ -1,6 +1,6 @@
 # kube-jenkins
 
-Kube-jenkins kubernetes-native CI/CD pipelines using Jenkins
+kubernetes-native CI/CD pipelines using Jenkins
 as a tool to launch jobs.
 
 **NOTE:** For people familiar with Kubernetes terminology,
@@ -26,7 +26,7 @@ Jenkins is set up to at any time have no local state it depends on.
 Pod with jenkins can be deleted any time and new, identical jenkins instance
 will start up right away automatically.
 
-**Declaratvie job specification**
+**Declarative job specification**
 
 All jobs are described as Kubernetes config maps, Jenkins side-car
 auto discovers jobs from the cluster and updates the configuration.
