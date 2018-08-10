@@ -36,7 +36,7 @@ fi
 
 # start python process to watch kubectl config and generate XML/jobs
 while true; do
-    python3 -u /jenkins-sidecar/watch.py ${NAMESPACE} ${CONFIGMAP_TO_WATCH} ${JENKINS_JOB_DIRECTORY}
+    python3 -u /kube-jenkins-sidecar/watch.py ${NAMESPACE} ${CONFIGMAP_TO_WATCH} ${JENKINS_JOB_DIRECTORY}
     sleep 2
 done
 

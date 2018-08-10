@@ -8,16 +8,50 @@ data:
   job-config.yaml: |
     ---
     - job:
+        name: "sbe-mt-helm-start-new"
+        namespace: "default"
+        git_url: "git@github.com:gravitational/SBE-MT.git"
+        git_branch: "gravitational/k8s"
+        aws_secret: "aws-key"
+        private_key_secret: "github-key"
+        service_account_name: "gus-test-jenkins"
+        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        run_command: |
+          kubectl create namespace tiller
+          kubectl create serviceaccount --namespace tiller tiller
+          kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=tiller:tiller
+          helm init --tiller-namespace tiller --service-account tiller
+          export DECRYPT_CHARTS=false
+          kubectl create namespace release-1
+          helm-wrapper install --timeout 900 --name release-1 --tiller-namespace tiller sbe --debug --namespace release-1 -f sbe/charts/sbe-symphony/secrets.yaml -f sbe/secrets.yaml
+        workdir: "gravitational/kubernetes/helm"
+    - job:
         name: "sbe-mt-helm-start"
         namespace: "default"
-        url: "https://github.com/gravitational/SBE-MT"
-        branch: "gravitational/k8s"
-        run_command: "helm install --namespace tiller sbe"
-        workdir: "gravitational/kubernetes/helm/sbe"
+        git_url: "git@github.com:gravitational/SBE-MT.git"
+        git_branch: "gravitational/k8s"
+        aws_secret: "aws-key"
+        private_key_secret: "github-key"
+        service_account_name: "gus-test-jenkins"
+        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        run_command: "kubectl create namespace tiller; \
+          kubectl create serviceaccount --namespace tiller tiller; \
+          kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=tiller:tiller; \
+          helm init --tiller-namespace tiller --service-account tiller; \
+          export DECRYPT_CHARTS=false && \
+          kubectl create namespace release-1; \
+          helm-wrapper install --timeout 900 --name release-1 --tiller-namespace tiller sbe --debug --namespace release-1 -f sbe/charts/sbe-symphony/secrets.yaml -f sbe/secrets.yaml"
+        workdir: "gravitational/kubernetes/helm"
     - job:
         name: "sbe-mt-helm-stop"
         namespace: "default"
-        url: "https://github.com/gravitational/SBE-MT"
-        branch: "gravitational/k8s"
-        run_command: "helm delete --purge sbe"
-        workdir: "gravitational/kubernetes/helm/sbe"
+        git_url: "git@github.com:gravitational/SBE-MT.git"
+        git_branch: "gravitational/k8s"
+        aws_secret: "aws-key"
+        private_key_secret: "github-key"
+        service_account_name: "gus-test-jenkins"
+        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        run_command: "helm delete release-1 --tiller-namespace tiller --purge && kubectl delete namespace release-1"
+        workdir: "gravitational/kubernetes/helm"
+
+

@@ -50,6 +50,19 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
   <buildWrappers/>
 </project>"""
 
+# job_script_configmap_template = """---
+# --
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: {generated_configmap_name}
+# data:
+#   run.sh: |-
+#     #!/bin/bash
+#     cd {workdir}
+#     {run_command}
+# """
+
 kubernetes_job_template = """---
 kind: Job
 apiVersion: batch/v1
@@ -62,54 +75,62 @@ spec:
       labels:
         app: {job_name}
     spec:
+      volumes:
+      - name: "github-secret"
+        secret:
+          secretName: "{private_key_secret}"
+      - name: "aws-secret"
+        secret:
+          secretName: "{aws_secret}"
       containers:
       - name: {job_name}
-        image: 655932586765.dkr.ecr.us-west-2.amazonaws.com/kubernetes-jenkins-job-base
+        image: 655932586765.dkr.ecr.us-west-2.amazonaws.com/kube-jenkins-job-base
         imagePullPolicy: IfNotPresent
         args: [{job_args}]
         volumeMounts:
-        - name: "github-key"
-          mountPath: "/etc/github"
-  volumes:
-  - name: "github-secret"
-    secret:
-      secretName: "github-key"
-    restartPolicy: Never
+        - name: "github-secret"
+          mountPath: "/etc/secrets/github"
+        - name: "aws-secret"
+          mountPath: "/etc/secrets/aws"
+        env:
+        - name: "GIT_URL"
+          value: "{git_url}"
+        - name: "GIT_BRANCH"
+          value: "{git_branch}"
+        - name: "SSH_FINGERPRINT"
+          value: "{ssh_fingerprint}"
+      restartPolicy: Never
+      serviceAccountName: {service_account_name}
   backoffLimit: 0
 """
 
 
 class Job:
-    job_directory = ""
-    name = ""
-    formatted_name = ""
-    kube_job_path = ""
-    namespace = ""
-    url = ""
-    branch = ""
-    run = ""
-    generated_jenkins_command = ""
-    generated_jenkins_xml = ""
-    generated_kubernetes_job = ""
-
     def __init__(self, job_dict, job_directory):
         self.job_directory = job_directory
         self.name = job_dict['job'].get('name')
         # self.formatted_name = "{name}".format(job_dict['job'].get('name').replace(' ', '_'))
         # self.kube_job_path = "{name}.yaml".format(.formatted_name)
         self.namespace = job_dict['job'].get('namespace', 'default')
-        self.url = job_dict['job'].get('url')
-        self.branch = job_dict['job'].get('branch')
+        self.git_url = job_dict['job'].get('git_url')
+        self.git_branch = job_dict['job'].get('git_branch', '')
+        self.private_key_secret = job_dict['job'].get('private_key_secret')
+        self.service_account_name = job_dict['job'].get('service_account_name')
+        self.ssh_fingerprint = job_dict['job'].get('ssh_fingerprint')
+        self.aws_secret = job_dict['job'].get('aws_secret', '')
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
 
         # formatted_name has spaces converted to underscores
         self.formatted_name = self.generate_formatted_name()
         self.kube_job_path = self.generate_kube_job_path()
+        # self.generated_job_script_configmap_name = self.generate_job_script_configmap_name()
 
         self.generated_jenkins_xml = self.generate_jenkins_xml()
+        # self.job_script_configmap = self.generate_job_script_configmap()
         self.generated_kubernetes_job = self.generate_kubernetes_job()
         self.generated_jenkins_command = self.generate_jenkins_command()
+        # self.job_script_configmap_name = self.save_job_script_configmap()
 
     def __str__(self):
         return str(self.__class__) + ": " + str(self.__dict__)
@@ -120,12 +141,30 @@ class Job:
     def generate_kube_job_path(self):
         return "{name}.yaml".format(name=self.name.replace(' ', '_'))
 
+    # def generate_job_script_configmap_name(self):
+    #     return "{name}.yaml".format(name=self.name.replace(' ', '_'))
+
     def generate_jenkins_command(self):
-        return "kubectl apply -f {dir}{sep}{job_path}".format(
-            dir=self.job_directory,
-            sep=os.sep,
-            job_path=self.kube_job_path,
-        )
+        pre_commands = [
+            "cat {dir}{sep}{job_path}".format(
+                dir=self.job_directory,
+                sep=os.sep,
+                job_path=self.kube_job_path,
+            ),
+        ]
+        run_commands = [
+            "kubectl apply -f {dir}{sep}{job_path}".format(
+                dir=self.job_directory,
+                sep=os.sep,
+                job_path=self.kube_job_path,
+            )
+        ]
+        post_commands = [
+            "while true; do kubectl describe jobs/{name} | grep -q '1 Running'; if [ $? -eq 0]; then kubectl logs -f jobs/{name}; else grep -q '1 Failed'; if [ $? -eq 0 ]; then kubectl describe jobs/{name}; fi; fi; done".format(
+                name=self.formatted_name,
+            ),
+        ]
+        return "\n".join(pre_commands + run_commands + post_commands)
 
     def generate_jenkins_xml(self):
         # xml_run_command = []
@@ -163,12 +202,31 @@ class Job:
             ))
             fp.write(jenkins_xml)
 
+    # def generate_job_script_configmap(self):
+    #     job_spec = job_script_configmap_template.format(
+    #         generated_configmap_name=self.generate_job_script_configmap_name(),
+    #         workdir=self.workdir,
+    #         run_command=self.run_command,
+    #     )
+    #     logging.debug("Generated Kubernetes script configmap '{generated_configmap_name}' for  '{name}'".format(
+    #         generated_configmap_name=self.generate_job_script_configmap_name(),
+    #         name=self.formatted_name)
+    #     )
+    #     # print(job_spec)
+    #     return job_spec
+
     def generate_kubernetes_job(self):
         args = "cd {workdir} && {command}".format(workdir=self.workdir, command=self.run_command)
         job_spec = kubernetes_job_template.format(
             job_name=self.formatted_name,
             job_namespace=self.namespace,
             job_args='"{args}"'.format(args=args),
+            git_url=self.git_url,
+            git_branch=self.git_branch,
+            private_key_secret=self.private_key_secret,
+            ssh_fingerprint=self.ssh_fingerprint,
+            service_account_name=self.service_account_name,
+            aws_secret=self.aws_secret,
         )
         logging.debug("Generated Kubernetes job spec for '{name}'".format(name=self.formatted_name))
         # print(job_spec)

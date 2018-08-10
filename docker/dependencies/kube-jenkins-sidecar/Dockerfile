@@ -22,10 +22,12 @@ RUN useradd -u 1000 jenkins
 RUN sed -i 's/Defaults    requiretty/#Defaults    requiretty/g' /etc/sudoers
 RUN echo "jenkins ALL=(ALL) NOPASSWD: ALL" | tee -a visudo
 
+# speeds up build
+ADD rootfs/kube-jenkins-sidecar/requirements.txt /tmp/requirements.txt
+RUN pip3 install -r /tmp/requirements.txt
+
 ADD rootfs/ /
-RUN pip3 install -r /jenkins-sidecar/requirements.txt
 
 USER jenkins
 
-#CMD ["tail", "-F", "/var/log/dpkg.log"]
-ENTRYPOINT ["/jenkins-sidecar/entrypoint.sh"]
+ENTRYPOINT ["/kube-jenkins-sidecar/entrypoint.sh"]
