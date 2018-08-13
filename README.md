@@ -47,3 +47,44 @@ charts. Logs should be managed by kubernetes.
 Kubernetes is responsible for running CI/CD jobs as kubernetes native jobs. It takes care of secret management, resource
 allocation, running the jobs and pretty much everything else.
 
+
+### Example Job ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-job-map
+  namespace: default
+data:
+  job-config.yaml: |
+    ---
+    - job:
+        name: "start-helm-test"
+        namespace: "default"
+        git_url: "git@github.com:gravitational/helm-test.git"
+        git_branch: "gravitational/k8s"
+        aws_secret: "aws-key"
+        private_key_secret: "github-key"
+        service_account_name: "gus-test-jenkins"
+        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        run_command: "kubectl create namespace tiller; \
+          kubectl create serviceaccount --namespace tiller tiller; \
+          kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=tiller:tiller; \
+          helm init --tiller-namespace tiller --service-account tiller; \
+          export DECRYPT_CHARTS=false && \
+          kubectl create namespace release-1; \
+          helm-wrapper install --timeout 900 --name release-1 --tiller-namespace tiller helm-test-chart --debug --namespace release-1 -f helm-test/charts/secrets.yaml -f helm-test/secrets.yaml"
+        workdir: "gravitational/kubernetes/helm"
+    - job:
+        name: "stop-helm-test"
+        namespace: "default"
+        git_url: "git@github.com:gravitational/helm-test.git"
+        git_branch: "gravitational/k8s"
+        aws_secret: "aws-key"
+        private_key_secret: "github-key"
+        service_account_name: "gus-test-jenkins"
+        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        run_command: "helm delete release-1 --tiller-namespace tiller --purge && kubectl delete namespace release-1"
+        workdir: "gravitational/kubernetes/helm"
+``` 
