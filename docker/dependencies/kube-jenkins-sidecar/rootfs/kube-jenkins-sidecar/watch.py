@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from kubernetes import client, config, watch
-# from pprint import pprint
 import logging
 import os
 import shutil
@@ -109,8 +108,6 @@ class Job:
     def __init__(self, job_dict, job_directory):
         self.job_directory = job_directory
         self.name = job_dict['job'].get('name')
-        # self.formatted_name = "{name}".format(job_dict['job'].get('name').replace(' ', '_'))
-        # self.kube_job_path = "{name}.yaml".format(.formatted_name)
         self.namespace = job_dict['job'].get('namespace', 'default')
         self.git_url = job_dict['job'].get('git_url')
         self.git_branch = job_dict['job'].get('git_branch', '')
@@ -127,9 +124,9 @@ class Job:
         # self.generated_job_script_configmap_name = self.generate_job_script_configmap_name()
 
         self.generated_jenkins_xml = self.generate_jenkins_xml()
-        # self.job_script_configmap = self.generate_job_script_configmap()
         self.generated_kubernetes_job = self.generate_kubernetes_job()
         self.generated_jenkins_command = self.generate_jenkins_command()
+        # self.job_script_configmap = self.generate_job_script_configmap()
         # self.job_script_configmap_name = self.save_job_script_configmap()
 
     def __str__(self):
@@ -185,10 +182,6 @@ class Job:
             sep=os.sep,
             filename=jenkins_job_filename,
         )
-        # logging.debug("Jenkins job output path for '{name}' is '{path}'".format(
-        #     name=self.formatted_name,
-        #     path=full_output_path,
-        # ))
 
         directory_to_use = "{root_path}{sep}{dir}".format(root_path=self.job_directory, sep=os.sep, dir=directory)
         if not os.path.exists(directory_to_use):
@@ -212,8 +205,6 @@ class Job:
     #         generated_configmap_name=self.generate_job_script_configmap_name(),
     #         name=self.formatted_name)
     #     )
-    #     # print(job_spec)
-    #     return job_spec
 
     def generate_kubernetes_job(self):
         args = "cd {workdir} && {command}".format(workdir=self.workdir, command=self.run_command)
@@ -229,24 +220,16 @@ class Job:
             aws_secret=self.aws_secret,
         )
         logging.debug("Generated Kubernetes job spec for '{name}'".format(name=self.formatted_name))
-        # print(job_spec)
         return job_spec
 
     def save_kubernetes_job(self):
         job_spec = self.generated_kubernetes_job
-        # v1_batch.create_namespaced_job(self.namespace, job_spec)
-        # directory = self.name
-        # jenkins_job_filename = "{dir}/job.xml".format(dir=directory)
 
         full_output_path = "{root_path}{sep}{filename}".format(
             root_path=self.job_directory,
             sep=os.sep,
             filename=self.kube_job_path,
         )
-        # logging.debug("Kubernetes job output path for '{name}' is '{path}'".format(
-        #     name=self.formatted_name,
-        #     path=full_output_path,
-        # ))
 
         # directory_to_use = "{root_path}/{dir}".format(root_path=self.job_directory, dir=directory)
         # if not os.path.exists(directory_to_use):
@@ -267,7 +250,6 @@ def run_cleanup(directory, list_of_current_jobs):
             # don't process jenkins jobs here
             if file == 'config.xml':
                 continue
-            # print("file: {file}".format(file=file))
             full_path = "{subdir}{sep}{file}".format(subdir=subdir, sep=os.sep, file=file)
 
             filename, extension = os.path.splitext(file)
@@ -275,7 +257,6 @@ def run_cleanup(directory, list_of_current_jobs):
                 logging.debug("Removing file '{path}'".format(path=full_path))
                 os.unlink(full_path)
         for directory in dirs:
-            # print("dir: {directory}".format(directory=directory))
             full_dir_path = "{subdir}{sep}{directory}".format(subdir=subdir, sep=os.sep, directory=directory)
             if directory not in list_of_current_jobs:
                 logging.debug("Recursively removing directory '{path}'".format(path=full_dir_path))
@@ -286,7 +267,6 @@ def parse_job_config(job_config):
     yaml_config = yaml.load(job_config)
     created_jobs = []
     for job_dict in yaml_config:
-        # print(Job(job_dict).generated_jenkins_xml)
         this_job = Job(job_dict, jenkins_job_directory)
         this_job.save_jenkins_xml()
         this_job.save_kubernetes_job()
@@ -306,7 +286,6 @@ while True:
         stream = w.stream(v1.list_namespaced_config_map, namespace, resource_version=resrc_version)
     for event in stream:
         if event['raw_object']['metadata']['name'] == configmap_to_watch:
-            # print(event)
             resrc_version = event['raw_object']['metadata']['resourceVersion']
             print("{type} ({resourceVersion})".format(type=event['type'], resourceVersion=resrc_version))
             if event['type'] == "ADDED" or event['type'] == "MODIFIED":
