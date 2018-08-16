@@ -1,7 +1,7 @@
 #FROM quay.io/gravitational/debian-grande@sha256:b4a2291a3b55ce6e71693a28269ee1228f164d887086168974bc967cec54bab3
 FROM ubuntu
 
-ENV KUBERNETES_VERSION v1.10.0
+ENV KUBERNETES_VERSION v1.11.0
 ENV DEBIAN_FRONTEND "noninteractive"
 
 RUN apt-get -y update && \

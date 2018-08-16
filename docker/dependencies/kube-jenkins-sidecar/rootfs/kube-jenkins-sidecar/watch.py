@@ -46,21 +46,12 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
     </hudson.tasks.Shell>
   </builders>
   <publishers/>
-  <buildWrappers/>
+  <buildWrappers>
+    <hudson.plugins.ansicolor.AnsiColorBuildWrapper plugin="ansicolor@0.5.2">
+      <colorMapName>xterm</colorMapName>
+    </hudson.plugins.ansicolor.AnsiColorBuildWrapper>
+  </buildWrappers>
 </project>"""
-
-# job_script_configmap_template = """---
-# --
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: {generated_configmap_name}
-# data:
-#   run.sh: |-
-#     #!/bin/bash
-#     cd {workdir}
-#     {run_command}
-# """
 
 kubernetes_job_template = """---
 kind: Job
@@ -85,7 +76,7 @@ spec:
       - name: {job_name}
         image: 655932586765.dkr.ecr.us-west-2.amazonaws.com/kube-jenkins-job-base
         imagePullPolicy: IfNotPresent
-        args: [{job_args}]
+        args: {job_args}
         volumeMounts:
         - name: "github-secret"
           mountPath: "/etc/secrets/github"
@@ -109,25 +100,30 @@ class Job:
         self.job_directory = job_directory
         self.name = job_dict['job'].get('name')
         self.namespace = job_dict['job'].get('namespace', 'default')
-        self.git_url = job_dict['job'].get('git_url')
-        self.git_branch = job_dict['job'].get('git_branch', '')
-        self.private_key_secret = job_dict['job'].get('private_key_secret')
-        self.service_account_name = job_dict['job'].get('service_account_name')
-        self.ssh_fingerprint = job_dict['job'].get('ssh_fingerprint')
         self.aws_secret = job_dict['job'].get('aws_secret', '')
+        self.service_account_name = job_dict['job'].get('service_account_name')
+
+        if job_dict['job'].get('git'):
+            self.git_url = job_dict['job']['git'].get('git_url')
+            self.git_branch = job_dict['job']['git'].get('git_branch', '')
+            self.private_key_secret = job_dict['job']['git'].get('ssh_secret_ref')
+            self.ssh_fingerprint = job_dict['job']['git'].get('ssh_fingerprint')
+            # self.ssh_fingerprint = self.get_ssh_fingerprint_from_secret(self.private_key_secret)
+        else:
+            self.git_url = job_dict['job'].get('git_url')
+            self.git_branch = job_dict['job'].get('git_branch', '')
+            self.private_key_secret = job_dict['job'].get('private_key_secret')
+            self.ssh_fingerprint = job_dict['job'].get('ssh_fingerprint')
+        
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
 
-        # formatted_name has spaces converted to underscores
         self.formatted_name = self.generate_formatted_name()
         self.kube_job_path = self.generate_kube_job_path()
-        # self.generated_job_script_configmap_name = self.generate_job_script_configmap_name()
 
         self.generated_jenkins_xml = self.generate_jenkins_xml()
         self.generated_kubernetes_job = self.generate_kubernetes_job()
         self.generated_jenkins_command = self.generate_jenkins_command()
-        # self.job_script_configmap = self.generate_job_script_configmap()
-        # self.job_script_configmap_name = self.save_job_script_configmap()
 
     def __str__(self):
         return str(self.__class__) + ": " + str(self.__dict__)
@@ -138,17 +134,19 @@ class Job:
     def generate_kube_job_path(self):
         return "{name}.yaml".format(name=self.name.replace(' ', '_'))
 
-    # def generate_job_script_configmap_name(self):
-    #     return "{name}.yaml".format(name=self.name.replace(' ', '_'))
-
     def generate_jenkins_command(self):
         pre_commands = [
+            "#!/bin/bash",
             "cat {dir}{sep}{job_path}".format(
                 dir=self.job_directory,
                 sep=os.sep,
                 job_path=self.kube_job_path,
             ),
+            "kubectl delete jobs/{job_name} || true".format(
+                job_name=self.formatted_name,
+            ),
         ]
+
         run_commands = [
             "kubectl apply -f {dir}{sep}{job_path}".format(
                 dir=self.job_directory,
@@ -157,20 +155,48 @@ class Job:
             )
         ]
         post_commands = [
-            "while true; do kubectl describe jobs/{name} | grep -q '1 Running'; if [ $? -eq 0]; then kubectl logs -f jobs/{name}; else grep -q '1 Failed'; if [ $? -eq 0 ]; then kubectl describe jobs/{name}; fi; fi; done".format(
-                name=self.formatted_name,
-            ),
+            "set +e",
+            "ATTEMPTS=0",
+            "MAX_ATTEMPTS=60",
+            "while [ ${ATTEMPTS} -lt 60 ]; do",
+            "   ((ATTEMPTS++))",
+            "   kubectl logs -f jobs/{job_name} -n {ns}".format(job_name=self.formatted_name, ns=self.namespace),
+            "   if [ $? -ne 0 ]; then",
+            "       echo \"Attempt: ${ATTEMPTS}/${MAX_ATTEMPTS}\"",
+            "       sleep 3",
+            "   else",
+            "       break",
+            "   fi",
+            "done",
+            "if [ ${ATTEMPTS} -ge ${MAX_ATTEMPTS} ]; then",
+            "    echo 'Maximum attempts reached when trying to show logs, showing job description'",
+            "    kubectl describe jobs/{job_name}".format(job_name=self.formatted_name),
+            "    echo 'Exiting with return code 2'",
+            "    exit 2",
+            "fi",
+            "if [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.succeeded}}') ]]; then".format(job_name=self.formatted_name, ns=self.namespace),
+            "    echo 'Job succeeded, exiting with return code 0'",
+            "    exit 0",
+            "elif [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.failed}}') ]]; then".format(job_name=self.formatted_name, ns=self.namespace),
+            "    echo 'Job failed, showing pod description'",
+            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(job_name=self.formatted_name),
+            "    echo \"Pod name: ${POD_NAME}\"",
+            "    kubectl describe pod/${POD_NAME}",
+            "    echo 'Exiting with return code 1'",
+            "    exit 1",
+            "else",
+            "    echo 'Unable to determine job status, showing pod description'",
+            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(job_name=self.formatted_name),
+            "    echo \"Pod name: ${POD_NAME}\"",
+            "    kubectl describe pod/${POD_NAME}",
+            "    echo 'Exiting with return code 1 for safety'",
+            "    exit 1",
+            "fi",
         ]
         return "\n".join(pre_commands + run_commands + post_commands)
 
     def generate_jenkins_xml(self):
-        # xml_run_command = []
-        # if self.workdir:
-        #    xml_run_command.append("cd {0}".format(self.workdir))
-        # xml_run_command.append(self.run_command)
-
         logging.debug("Generated Jenkins job spec for '{name}'".format(name=self.formatted_name))
-        # return jenkins_xml_template.format(run_command="\n".join(xml_run_command))
         return jenkins_xml_template.format(jenkins_command=self.generate_jenkins_command())
 
     def save_jenkins_xml(self):
@@ -195,23 +221,15 @@ class Job:
             ))
             fp.write(jenkins_xml)
 
-    # def generate_job_script_configmap(self):
-    #     job_spec = job_script_configmap_template.format(
-    #         generated_configmap_name=self.generate_job_script_configmap_name(),
-    #         workdir=self.workdir,
-    #         run_command=self.run_command,
-    #     )
-    #     logging.debug("Generated Kubernetes script configmap '{generated_configmap_name}' for  '{name}'".format(
-    #         generated_configmap_name=self.generate_job_script_configmap_name(),
-    #         name=self.formatted_name)
-    #     )
-
     def generate_kubernetes_job(self):
-        args = "cd {workdir} && {command}".format(workdir=self.workdir, command=self.run_command)
+        arg_list = []
+        arg_list.append("cd {workdir}".format(workdir=self.workdir))
+        arg_list = arg_list + self.run_command.strip().split("\n")
+
         job_spec = kubernetes_job_template.format(
             job_name=self.formatted_name,
             job_namespace=self.namespace,
-            job_args='"{args}"'.format(args=args),
+            job_args="{args}".format(args=arg_list),
             git_url=self.git_url,
             git_branch=self.git_branch,
             private_key_secret=self.private_key_secret,
@@ -231,11 +249,6 @@ class Job:
             filename=self.kube_job_path,
         )
 
-        # directory_to_use = "{root_path}/{dir}".format(root_path=self.job_directory, dir=directory)
-        # if not os.path.exists(directory_to_use):
-        #     logging.debug("'{dir}' does not exist, creating it".format(dir=directory_to_use))
-        #     os.makedirs("{root_path}/{dir}".format(root_path=self.job_directory, dir=directory))
-
         with open(full_output_path, 'w') as fp:
             logging.debug("Writing Kubernetes job for '{name}' to '{path}'".format(
                 name=self.formatted_name,
@@ -244,7 +257,7 @@ class Job:
             fp.write(job_spec)
 
 
-def run_cleanup(directory, list_of_current_jobs):
+def run_cleanup(directory, jobs_to_remove):
     for subdir, dirs, files in os.walk(directory):
         for file in files:
             # don't process jenkins jobs here
@@ -253,25 +266,23 @@ def run_cleanup(directory, list_of_current_jobs):
             full_path = "{subdir}{sep}{file}".format(subdir=subdir, sep=os.sep, file=file)
 
             filename, extension = os.path.splitext(file)
-            if filename not in list_of_current_jobs:
+            if filename in jobs_to_remove:
                 logging.debug("Removing file '{path}'".format(path=full_path))
                 os.unlink(full_path)
         for directory in dirs:
             full_dir_path = "{subdir}{sep}{directory}".format(subdir=subdir, sep=os.sep, directory=directory)
-            if directory not in list_of_current_jobs:
+            if directory in jobs_to_remove:
                 logging.debug("Recursively removing directory '{path}'".format(path=full_dir_path))
                 shutil.rmtree(full_dir_path)
 
-
 def parse_job_config(job_config):
     yaml_config = yaml.load(job_config)
-    created_jobs = []
-    for job_dict in yaml_config:
-        this_job = Job(job_dict, jenkins_job_directory)
-        this_job.save_jenkins_xml()
-        this_job.save_kubernetes_job()
-        created_jobs.append(this_job.formatted_name)
-    run_cleanup(jenkins_job_directory, created_jobs)
+    return Job(yaml_config[0], jenkins_job_directory)
+
+def save_job(job):
+    run_cleanup(jenkins_job_directory, [job.formatted_name])
+    job.save_jenkins_xml()
+    job.save_kubernetes_job()
 
 
 resrc_version = None
@@ -285,12 +296,16 @@ while True:
     else:
         stream = w.stream(v1.list_namespaced_config_map, namespace, resource_version=resrc_version)
     for event in stream:
-        if event['raw_object']['metadata']['name'] == configmap_to_watch:
-            resrc_version = event['raw_object']['metadata']['resourceVersion']
-            print("{type} ({resourceVersion})".format(type=event['type'], resourceVersion=resrc_version))
-            if event['type'] == "ADDED" or event['type'] == "MODIFIED":
-                data_structure = event['raw_object']['data']
-                if data_structure.get('job-config.yaml'):
-                    parse_job_config(data_structure.get('job-config.yaml'))
-            if event['type'] == "DELETED":
-                run_cleanup(jenkins_job_directory, [])
+        if event['raw_object']['metadata'].get('labels'):
+            if event['raw_object']['metadata']['labels'].get('ci-job-spec') == "true":
+                resrc_version = event['raw_object']['metadata']['resourceVersion']
+                print("{type} ({resourceVersion})".format(type=event['type'], resourceVersion=resrc_version))
+                if event['type'] == "ADDED" or event['type'] == "MODIFIED":
+                    data_structure = event['raw_object']['data']
+                    if data_structure.get('job.yaml'):
+                        save_job(parse_job_config(data_structure.get('job.yaml')))
+                if event['type'] == "DELETED":
+                    data_structure = event['raw_object']['data']
+                    if data_structure.get('job.yaml'):
+                        job = parse_job_config(data_structure.get('job.yaml'))
+                        run_cleanup(jenkins_job_directory, [job.formatted_name])

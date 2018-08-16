@@ -1,7 +1,7 @@
 FROM ubuntu
 
 ENV DEBIAN_FRONTEND "noninteractive"
-ENV KUBERNETES_VERSION v1.10.0
+ENV KUBERNETES_VERSION v1.11.0
 ENV HELM_VERSION v2.9.1
 ENV SRC_DIR "/src"
 ENV AWS_KEY_DIR "/etc/secrets/aws"
@@ -9,7 +9,7 @@ ENV GITHUB_KEY_DIR "/etc/secrets/github"
 ENV GITHUB_SSH_FINGERPRINT "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
 
 RUN apt-get -y update && \
-    apt-get -y install git curl openssh-client sudo python-pip && \
+    apt-get -y install git curl openssh-client sudo python-pip jq && \
     rm -rf /var/cache/apt
 
 RUN curl -o /usr/local/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/kubectl && \

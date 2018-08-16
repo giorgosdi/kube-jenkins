@@ -94,7 +94,11 @@ fi
 entrypoint_log "Working directory: '$(pwd)'"
 entrypoint_log "Writing commands to /tmp/run.sh"
 echo "cd ${SRC_DIR}" > /tmp/run.sh
-echo "$*" >> /tmp/run.sh
+#echo "$" >> /tmp/run.sh
+for line in "$@"; do
+    # replace escaped backslashes from YAML/ConfigMap with single backslashes for bash line extension
+    echo "$line" | sed 's_\\\\_\\_g' >> /tmp/run.sh
+done
 chmod +x /tmp/run.sh
 entrypoint_log "/tmp/run.sh:"
 cat /tmp/run.sh
