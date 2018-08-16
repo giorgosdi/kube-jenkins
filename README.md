@@ -50,41 +50,57 @@ allocation, running the jobs and pretty much everything else.
 
 ### Example Job ConfigMap
 
+- All ConfigMaps containing jobs that should be processed must have a label with key ```ci-job-spec```, value ```true```
+- One job per ConfigMap, any more will be ignored
+- Job data YAML must be in a section called ```job.yaml```
+- ```ssh_secret_ref``` under the ```git``` section should be the name of a a secret already stored in kubernetes
+
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: jenkins-job-map
+  name: start-helm-test
   namespace: default
+  labels: {
+    "ci-job-spec": "true"
+  }  
 data:
-  job-config.yaml: |
+  job.yaml: |
     ---
     - job:
         name: "start-helm-test"
         namespace: "default"
-        git_url: "git@github.com:gravitational/helm-test.git"
-        git_branch: "gravitational/k8s"
-        aws_secret: "aws-key"
-        private_key_secret: "github-key"
-        service_account_name: "gus-test-jenkins"
-        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
-        run_command: "kubectl create namespace tiller; \
-          kubectl create serviceaccount --namespace tiller tiller; \
-          kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=tiller:tiller; \
-          helm init --tiller-namespace tiller --service-account tiller; \
-          export DECRYPT_CHARTS=false && \
-          kubectl create namespace release-1; \
-          helm-wrapper install --timeout 900 --name release-1 --tiller-namespace tiller helm-test-chart --debug --namespace release-1 -f helm-test/charts/secrets.yaml -f helm-test/secrets.yaml"
-        workdir: "gravitational/kubernetes/helm"
-    - job:
-        name: "stop-helm-test"
-        namespace: "default"
-        git_url: "git@github.com:gravitational/helm-test.git"
-        git_branch: "gravitational/k8s"
-        aws_secret: "aws-key"
-        private_key_secret: "github-key"
-        service_account_name: "gus-test-jenkins"
-        ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
-        run_command: "helm delete release-1 --tiller-namespace tiller --purge && kubectl delete namespace release-1"
+        git:
+          url: "git@github.com:gravitational/helm-test.git"
+          branch: "gravitational/k8s"
+          ssh_secret_ref: "github-key"
+          ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
+        aws_secret: "aws-key"        
+        service_account_name: "gus-test-jenkins"        
+        run_command: |
+          kubectl create namespace tiller
+          kubectl create serviceaccount --namespace tiller tiller
+          kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=tiller:tiller
+          helm init --tiller-namespace tiller --service-account tiller
+          export DECRYPT_CHARTS=false
+          kubectl create namespace release-1
+          helm-wrapper install --timeout 900 --name release-1 --tiller-namespace tiller helm-test-chart --debug --namespace release-1 -f helm-test/charts/secrets.yaml -f helm-test/secrets.yaml
         workdir: "gravitational/kubernetes/helm"
 ``` 
+
+Example github secret:
+
+- ```ssh_fingerprint``` is the SSH RSA fingerprint of the git server you're connecting to in SHA256 hash format - see
+https://help.github.com/articles/github-s-ssh-key-fingerprints/ for an example (it must be base64-encoded for the secret)
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-ssh-key
+  namespace: default
+type: Opaque
+data:
+  private-key: [base64-encoded SSH private key - e.g. cat ~/.ssh/id_rsa | base64 -w0] 
+  ssh_fingerprint: U0hBMjU2Om5UaGJnNmtYVXBKV0dsN0UxSUdPQ3NwUm9tVHhkQ0FSTHZpS3c2RTVTWTg=
+```
