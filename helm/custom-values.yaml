@@ -149,8 +149,8 @@ Master:
     ImagePullPolicy: IfNotPresent
     #ImagePullSecret: awsecr-cred
     JenkinsJobMap:
-      Namespace: default # TODO gus: change this
-      ConfigMapName: jenkins-job-map
+      ConfigMapNamespace: default # TODO gus: change this
+      LabelToWatch: ci-job-spec
     JenkinsJobDirectory: /var/jenkins_home/jobs
 
 Agent:

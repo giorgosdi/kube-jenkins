@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 from kubernetes import client, config, watch
 import logging
 import os
@@ -6,16 +7,16 @@ import shutil
 import sys
 import yaml
 
-namespace = ""
-configmap_to_watch = ""
+configmap_namespace = ""
+label_to_watch = ""
 jenkins_job_directory = ""
 
 if len(sys.argv) < 3:
     print("Usage: watch.py <namespace> <configmap name> <jenkins job output directory>")
     sys.exit(1)
 else:
-    namespace = sys.argv[1]
-    configmap_to_watch = sys.argv[2]
+    configmap_namespace = sys.argv[1]
+    label_to_watch = sys.argv[2]
     jenkins_job_directory = sys.argv[3]
 
 # this is mostly needed for local testing
@@ -103,17 +104,10 @@ class Job:
         self.aws_secret = job_dict['job'].get('aws_secret', '')
         self.service_account_name = job_dict['job'].get('service_account_name')
 
-        if job_dict['job'].get('git'):
-            self.git_url = job_dict['job']['git'].get('git_url')
-            self.git_branch = job_dict['job']['git'].get('git_branch', '')
-            self.private_key_secret = job_dict['job']['git'].get('ssh_secret_ref')
-            self.ssh_fingerprint = job_dict['job']['git'].get('ssh_fingerprint')
-            # self.ssh_fingerprint = self.get_ssh_fingerprint_from_secret(self.private_key_secret)
-        else:
-            self.git_url = job_dict['job'].get('git_url')
-            self.git_branch = job_dict['job'].get('git_branch', '')
-            self.private_key_secret = job_dict['job'].get('private_key_secret')
-            self.ssh_fingerprint = job_dict['job'].get('ssh_fingerprint')
+        self.git_url = job_dict['job']['git'].get('url')
+        self.git_branch = job_dict['job']['git'].get('branch', '')
+        self.private_key_secret = job_dict['job']['git'].get('ssh_secret_ref')
+        self.ssh_fingerprint = get_ssh_fingerprint_from_secret(self.private_key_secret, configmap_namespace)
         
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
@@ -174,19 +168,29 @@ class Job:
             "    echo 'Exiting with return code 2'",
             "    exit 2",
             "fi",
-            "if [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.succeeded}}') ]]; then".format(job_name=self.formatted_name, ns=self.namespace),
+            "if [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.succeeded}}') ]]; then".format(
+                job_name=self.formatted_name,
+                ns=self.namespace,
+            ),
             "    echo 'Job succeeded, exiting with return code 0'",
             "    exit 0",
-            "elif [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.failed}}') ]]; then".format(job_name=self.formatted_name, ns=self.namespace),
+            "elif [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.failed}}') ]]; then".format(
+                job_name=self.formatted_name,
+                ns=self.namespace
+            ),
             "    echo 'Job failed, showing pod description'",
-            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(job_name=self.formatted_name),
+            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(
+                job_name=self.formatted_name
+            ),
             "    echo \"Pod name: ${POD_NAME}\"",
             "    kubectl describe pod/${POD_NAME}",
             "    echo 'Exiting with return code 1'",
             "    exit 1",
             "else",
             "    echo 'Unable to determine job status, showing pod description'",
-            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(job_name=self.formatted_name),
+            "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(
+                job_name=self.formatted_name
+            ),
             "    echo \"Pod name: ${POD_NAME}\"",
             "    kubectl describe pod/${POD_NAME}",
             "    echo 'Exiting with return code 1 for safety'",
@@ -257,6 +261,11 @@ class Job:
             fp.write(job_spec)
 
 
+def get_ssh_fingerprint_from_secret(secret_name, secret_namespace):
+    secret_object = v1.read_namespaced_secret(secret_name, secret_namespace)
+    return base64.b64decode(secret_object.data.get('ssh_fingerprint', '')).decode('utf-8')
+
+
 def run_cleanup(directory, jobs_to_remove):
     for subdir, dirs, files in os.walk(directory):
         for file in files:
@@ -275,14 +284,16 @@ def run_cleanup(directory, jobs_to_remove):
                 logging.debug("Recursively removing directory '{path}'".format(path=full_dir_path))
                 shutil.rmtree(full_dir_path)
 
+
 def parse_job_config(job_config):
     yaml_config = yaml.load(job_config)
     return Job(yaml_config[0], jenkins_job_directory)
 
-def save_job(job):
-    run_cleanup(jenkins_job_directory, [job.formatted_name])
-    job.save_jenkins_xml()
-    job.save_kubernetes_job()
+
+def save_job(passed_job):
+    run_cleanup(jenkins_job_directory, [passed_job.formatted_name])
+    passed_job.save_jenkins_xml()
+    passed_job.save_kubernetes_job()
 
 
 resrc_version = None
@@ -292,12 +303,12 @@ logging.basicConfig(format=LOG_FORMAT, level=logging.DEBUG)
 
 while True:
     if resrc_version is None:
-        stream = w.stream(v1.list_namespaced_config_map, namespace)
+        stream = w.stream(v1.list_namespaced_config_map, configmap_namespace)
     else:
-        stream = w.stream(v1.list_namespaced_config_map, namespace, resource_version=resrc_version)
+        stream = w.stream(v1.list_namespaced_config_map, configmap_namespace, resource_version=resrc_version)
     for event in stream:
         if event['raw_object']['metadata'].get('labels'):
-            if event['raw_object']['metadata']['labels'].get('ci-job-spec') == "true":
+            if event['raw_object']['metadata']['labels'].get(label_to_watch) == "true":
                 resrc_version = event['raw_object']['metadata']['resourceVersion']
                 print("{type} ({resourceVersion})".format(type=event['type'], resourceVersion=resrc_version))
                 if event['type'] == "ADDED" or event['type'] == "MODIFIED":

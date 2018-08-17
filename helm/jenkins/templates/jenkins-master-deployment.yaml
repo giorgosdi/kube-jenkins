@@ -111,8 +111,8 @@ spec:
           #- name: {{ .Values.Master.Sidecar.ImagePullSecret }}
           #{{- end }}
           args: [
-            "{{ .Values.Master.Sidecar.JenkinsJobMap.Namespace }}",
-            "{{ .Values.Master.Sidecar.JenkinsJobMap.ConfigMapName }}",
+            "{{ .Values.Master.Sidecar.JenkinsJobMap.ConfigMapNamespace }}",
+            "{{ .Values.Master.Sidecar.JenkinsJobMap.LabelToWatch }}",
             "{{ .Values.Master.Sidecar.JenkinsJobDirectory }}",
           ]
           volumeMounts:
