@@ -74,7 +74,6 @@ data:
           url: "git@github.com:gravitational/helm-test.git"
           branch: "gravitational/k8s"
           ssh_secret_ref: "github-key"
-          ssh_fingerprint: "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8"
         aws_secret: "aws-key"        
         service_account_name: "gus-test-jenkins"        
         run_command: |
