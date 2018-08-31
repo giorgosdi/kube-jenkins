@@ -92,7 +92,7 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
     <org.jenkinsci.plugins.ghprb.GhprbTrigger plugin="ghprb@1.42.0">
       <spec>H/5 * * * *</spec>
       <configVersion>3</configVersion>
-      <adminlist>{whitelisted_usernames}</adminlist>
+      <adminlist>{admin_users}</adminlist>
       <allowMembersOfWhitelistedOrgsAsAdmin>false</allowMembersOfWhitelistedOrgsAsAdmin>
       <orgslist>{whitelisted_orgs}</orgslist>
       <cron>H/5 * * * *</cron>
@@ -100,7 +100,7 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
       <onlyTriggerPhrase>false</onlyTriggerPhrase>
       <useGitHubHooks>true</useGitHubHooks>
       <permitAll>false</permitAll>
-      <whitelist></whitelist>
+      <whitelist>{whitelisted_users}</whitelist>
       <autoCloseFailedPullRequests>false</autoCloseFailedPullRequests>
       <displayBuildErrorsOnDownstreamBuilds>false</displayBuildErrorsOnDownstreamBuilds>
       <whiteListTargetBranches>
@@ -198,13 +198,15 @@ class Job:
         self.namespace = job_dict['job'].get('namespace', 'default')
         self.aws_secret = job_dict['job'].get('aws_secret', '')
         self.service_account_name = job_dict['job'].get('service_account_name')
-        self.whitelisted_usernames = job_dict['job'].get('whitelisted_usernames', '')
-        self.whitelisted_orgs = job_dict['job'].get('whitelisted_orgs', '')
 
         self.git_url = job_dict['job']['git'].get('url')
         self.git_branch = job_dict['job']['git'].get('branch', '')
         self.private_key_secret = job_dict['job']['git'].get('ssh_secret_ref')
         self.ssh_fingerprint = get_ssh_fingerprint_from_secret(self.private_key_secret, configmap_namespace)
+
+        self.ghprb_admin_users = job_dict['job'].get('ghprb', {}).get('admin_users', '')
+        self.ghprb_whitelisted_users = job_dict['job'].get('ghprb', {}).get('whitelisted_users', '')
+        self.ghprb_whitelisted_orgs = job_dict['job'].get('ghprb', {}).get('whitelisted_orgs', '')
 
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
@@ -308,8 +310,9 @@ class Job:
             jenkins_command=self.generate_jenkins_command(),
             git_ssh_url=self.get_github_ssh_url(),
             git_https_url=self.get_github_https_url(),
-            whitelisted_usernames=self.whitelisted_usernames,
-            whitelisted_orgs=self.whitelisted_orgs,
+            admin_users=self.ghprb_admin_users,
+            whitelisted_users=self.ghprb_whitelisted_users,
+            whitelisted_orgs=self.ghprb_whitelisted_orgs,
         )
 
     def save_jenkins_xml(self):
