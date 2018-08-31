@@ -90,6 +90,12 @@ else
     git clone ${GIT_URL} ${SRC_DIR}
 fi
 
+if [[ "${GIT_COMMIT}" != "%REPLACE_TOKEN_GIT_COMMIT%" ]]; then
+    entrypoint_log "Checking out supplied GIT_COMMIT SHA1 hash: '${GIT_COMMIT}'"
+    cd ${SRC_DIR}
+    git reset --hard ${GIT_COMMIT}
+fi
+
 # run command from args
 entrypoint_log "Working directory: '$(pwd)'"
 entrypoint_log "Writing commands to /tmp/run.sh"

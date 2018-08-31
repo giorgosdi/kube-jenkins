@@ -19,7 +19,7 @@ Master:
 # ImagePullSecret: jenkins
   # TODO gus: make this more resilient
   # it works ok for minikube, it should be better for prod
-  #ImagePullSecret: awsecr-cred
+  ImagePullSecret: awsecr-cred
   Component: "jenkins-master"
   UseSecurity: true
   # TODO gus: make sure this works properly
@@ -56,13 +56,12 @@ Master:
   ServicePort: 8080
   # For minikube, set this to NodePort, elsewhere use LoadBalancer
   # Use ClusterIP if your setup includes ingress controller
-  #ServiceType: LoadBalancer
-  ServiceType: ClusterIP
+  ServiceType: LoadBalancer
   # Master Service annotations
   ServiceAnnotations: {}
   #   service.beta.kubernetes.io/aws-load-balancer-backend-protocol: https
   # Used to create Ingress record (should used with ServiceType: ClusterIP)
-  HostName: gus-test-jenkins.bak.isym.io
+  #HostName: gus-test-jenkins.bak.isym.io
   # NodePort: <to set explicitly, choose port between 30000-32767
   ContainerPort: 8080
   # Enable Kubernetes Liveness and Readiness Probes
@@ -171,7 +170,7 @@ Agent:
   #ImageTag: 3.10-1
   ImageTag: latest
 # ImagePullSecret: jenkins
-  #ImagePullSecret: awsecr-cred
+  ImagePullSecret: awsecr-cred
   Component: "jenkins-slave"
   Privileged: false
   resources:

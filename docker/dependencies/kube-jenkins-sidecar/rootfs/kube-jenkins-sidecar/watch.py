@@ -29,17 +29,109 @@ except FileNotFoundError:
 v1 = client.CoreV1Api()
 v1_batch = client.BatchV1Api()
 
+# jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
+# <project>
+#   <description></description>
+#   <keepDependencies>false</keepDependencies>
+#   <properties/>
+#   <scm class="hudson.scm.NullSCM"/>
+#   <canRoam>true</canRoam>
+#   <disabled>false</disabled>
+#   <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+#   <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+#   <triggers/>
+#   <concurrentBuild>false</concurrentBuild>
+#   <builders>
+#     <hudson.tasks.Shell>
+#       <command>{jenkins_command}</command>
+#     </hudson.tasks.Shell>
+#   </builders>
+#   <publishers/>
+#   <buildWrappers>
+#     <hudson.plugins.ansicolor.AnsiColorBuildWrapper plugin="ansicolor@0.5.2">
+#       <colorMapName>xterm</colorMapName>
+#     </hudson.plugins.ansicolor.AnsiColorBuildWrapper>
+#   </buildWrappers>
+# </project>"""
+
 jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
 <project>
+  <actions/>
   <description></description>
   <keepDependencies>false</keepDependencies>
-  <properties/>
-  <scm class="hudson.scm.NullSCM"/>
+  <properties>
+    <com.coravy.hudson.plugins.github.GithubProjectProperty plugin="github@1.29.2">
+      <projectUrl>{git_https_url}</projectUrl>
+      <displayName></displayName>
+    </com.coravy.hudson.plugins.github.GithubProjectProperty>
+  </properties>
+  <scm class="hudson.plugins.git.GitSCM" plugin="git@3.9.1">
+    <configVersion>2</configVersion>
+    <userRemoteConfigs>
+      <hudson.plugins.git.UserRemoteConfig>
+        <name>origin</name>
+        <refspec>+refs/pull/*:refs/remotes/origin/pr/*</refspec>
+        <url>{git_ssh_url}</url>
+        <credentialsId>d989db42-79cf-4222-93e6-3a7301ead9cc</credentialsId>
+      </hudson.plugins.git.UserRemoteConfig>
+    </userRemoteConfigs>
+    <branches>
+      <hudson.plugins.git.BranchSpec>
+        <name>${{sha1}}</name>
+      </hudson.plugins.git.BranchSpec>
+    </branches>
+    <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+    <submoduleCfg class="list"/>
+    <extensions/>
+  </scm>
   <canRoam>true</canRoam>
   <disabled>false</disabled>
   <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
   <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
-  <triggers/>
+  <triggers>
+    <org.jenkinsci.plugins.ghprb.GhprbTrigger plugin="ghprb@1.42.0">
+      <spec>H/5 * * * *</spec>
+      <configVersion>3</configVersion>
+      <adminlist>{whitelisted_usernames}</adminlist>
+      <allowMembersOfWhitelistedOrgsAsAdmin>false</allowMembersOfWhitelistedOrgsAsAdmin>
+      <orgslist>{whitelisted_orgs}</orgslist>
+      <cron>H/5 * * * *</cron>
+      <buildDescTemplate></buildDescTemplate>
+      <onlyTriggerPhrase>false</onlyTriggerPhrase>
+      <useGitHubHooks>true</useGitHubHooks>
+      <permitAll>false</permitAll>
+      <whitelist></whitelist>
+      <autoCloseFailedPullRequests>false</autoCloseFailedPullRequests>
+      <displayBuildErrorsOnDownstreamBuilds>false</displayBuildErrorsOnDownstreamBuilds>
+      <whiteListTargetBranches>
+        <org.jenkinsci.plugins.ghprb.GhprbBranch>
+          <branch></branch>
+        </org.jenkinsci.plugins.ghprb.GhprbBranch>
+      </whiteListTargetBranches>
+      <blackListTargetBranches>
+        <org.jenkinsci.plugins.ghprb.GhprbBranch>
+          <branch></branch>
+        </org.jenkinsci.plugins.ghprb.GhprbBranch>
+      </blackListTargetBranches>
+      <gitHubAuthId>2e2a66d7-cfa5-42db-ba32-a2a64d89f01d</gitHubAuthId>
+      <triggerPhrase></triggerPhrase>
+      <skipBuildPhrase>.*\[skip\W+ci\].*</skipBuildPhrase>
+      <blackListCommitAuthor></blackListCommitAuthor>
+      <blackListLabels></blackListLabels>
+      <whiteListLabels></whiteListLabels>
+      <includedRegions></includedRegions>
+      <excludedRegions></excludedRegions>
+      <extensions>
+        <org.jenkinsci.plugins.ghprb.extensions.status.GhprbSimpleStatus>
+          <commitStatusContext></commitStatusContext>
+          <triggeredStatus></triggeredStatus>
+          <startedStatus></startedStatus>
+          <statusUrl></statusUrl>
+          <addTestResults>false</addTestResults>
+        </org.jenkinsci.plugins.ghprb.extensions.status.GhprbSimpleStatus>
+      </extensions>
+    </org.jenkinsci.plugins.ghprb.GhprbTrigger>
+  </triggers>
   <concurrentBuild>false</concurrentBuild>
   <builders>
     <hudson.tasks.Shell>
@@ -52,7 +144,8 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
       <colorMapName>xterm</colorMapName>
     </hudson.plugins.ansicolor.AnsiColorBuildWrapper>
   </buildWrappers>
-</project>"""
+</project>  
+"""
 
 kubernetes_job_template = """---
 kind: Job
@@ -88,6 +181,8 @@ spec:
           value: "{git_url}"
         - name: "GIT_BRANCH"
           value: "{git_branch}"
+        - name: "GIT_COMMIT"
+          value: "%REPLACE_TOKEN_GIT_COMMIT%"
         - name: "SSH_FINGERPRINT"
           value: "{ssh_fingerprint}"
       restartPolicy: Never
@@ -103,12 +198,14 @@ class Job:
         self.namespace = job_dict['job'].get('namespace', 'default')
         self.aws_secret = job_dict['job'].get('aws_secret', '')
         self.service_account_name = job_dict['job'].get('service_account_name')
+        self.whitelisted_usernames = job_dict['job'].get('whitelisted_usernames', '')
+        self.whitelisted_orgs = job_dict['job'].get('whitelisted_orgs', '')
 
         self.git_url = job_dict['job']['git'].get('url')
         self.git_branch = job_dict['job']['git'].get('branch', '')
         self.private_key_secret = job_dict['job']['git'].get('ssh_secret_ref')
         self.ssh_fingerprint = get_ssh_fingerprint_from_secret(self.private_key_secret, configmap_namespace)
-        
+
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
 
@@ -131,6 +228,12 @@ class Job:
     def generate_jenkins_command(self):
         pre_commands = [
             "#!/bin/bash",
+            "echo GIT_COMMIT: \"${GIT_COMMIT}\"",
+            "sed -i \"s/%REPLACE_TOKEN_GIT_COMMIT%/${{GIT_COMMIT}}/g\" > {dir}{sep}{job_path}".format(
+                dir=self.job_directory,
+                sep=os.sep,
+                job_path=self.kube_job_path,
+            ),
             "cat {dir}{sep}{job_path}".format(
                 dir=self.job_directory,
                 sep=os.sep,
@@ -201,7 +304,13 @@ class Job:
 
     def generate_jenkins_xml(self):
         logging.debug("Generated Jenkins job spec for '{name}'".format(name=self.formatted_name))
-        return jenkins_xml_template.format(jenkins_command=self.generate_jenkins_command())
+        return jenkins_xml_template.format(
+            jenkins_command=self.generate_jenkins_command(),
+            git_ssh_url=self.get_github_ssh_url(),
+            git_https_url=self.get_github_https_url(),
+            whitelisted_usernames=self.whitelisted_usernames,
+            whitelisted_orgs=self.whitelisted_orgs,
+        )
 
     def save_jenkins_xml(self):
         jenkins_xml = self.generated_jenkins_xml
@@ -224,6 +333,22 @@ class Job:
                 path=full_output_path,
             ))
             fp.write(jenkins_xml)
+
+    def get_github_https_url(self):
+        if 'https://github.com' in self.git_url:
+            return self.git_url
+        else:
+            _, repo_name = self.git_url.split(':')
+            repo_name = repo_name.replace('.git', '')
+            return "https://github.com/{repo}".format(repo=repo_name)
+
+    def get_github_ssh_url(self):
+        if 'git@github.com' in self.git_url:
+            return self.git_url
+        else:
+            part_list = self.git_url.split('/')
+            repo_name = '/'.join(part_list[-2:])
+            return "git@github.com:{repo}".format(repo=repo_name)
 
     def generate_kubernetes_job(self):
         arg_list = []

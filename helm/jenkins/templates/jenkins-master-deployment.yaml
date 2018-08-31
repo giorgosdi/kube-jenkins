@@ -94,6 +94,12 @@ spec:
               mountPath: /var/jenkins_plugins
               name: plugin-dir
             {{- end }}
+            {{- if .Values.Master.ExtraConfigFilesSecret }}
+            -
+              mountPath: /var/jenkins_extra_config_files
+              name: jenkins-extra-config-files
+              readOnly: true
+            {{- end }}
             -
               mountPath: /usr/share/jenkins/ref/secrets/
               name: secrets-dir
@@ -223,6 +229,12 @@ spec:
               name: jenkins-secrets
               readOnly: true
             {{- end }}
+            {{- if .Values.Master.ExtraConfigFilesSecret }}
+            -
+              mountPath: /var/jenkins_extra_config_files
+              name: jenkins-extra-config-files
+              readOnly: true
+            {{- end }}
             {{- if .Values.Master.Jobs }}
             -
               mountPath: /var/jenkins_jobs
@@ -255,6 +267,11 @@ spec:
       - name: jenkins-secrets
         secret:
           secretName: {{ .Values.Master.SecretsFilesSecret }}
+      {{- end }}
+      {{- if .Values.Master.ExtraConfigFilesSecret }}
+      - name: jenkins-extra-config-files
+        secret:
+          secretName: {{ .Values.Master.ExtraConfigFilesSecret }}
       {{- end }}
       {{- if .Values.Master.Jobs }}
       - name: jenkins-jobs
