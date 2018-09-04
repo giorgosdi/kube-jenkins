@@ -90,10 +90,11 @@ else
     git clone ${GIT_URL} ${SRC_DIR}
 fi
 
-if [[ "${GIT_COMMIT}" != "%REPLACE_TOKEN_GIT_COMMIT%" ]]; then
+if [[ "${GIT_COMMIT}" != "%REPLACE_TOKEN_GIT_COMMIT%" && "${GIT_COMMIT}" != "" ]]; then
     entrypoint_log "Checking out supplied GIT_COMMIT SHA1 hash: '${GIT_COMMIT}'"
     cd ${SRC_DIR}
-    git checkout ${GIT_COMMIT}
+    git fetch --tags --progress ${GIT_URL} +refs/pull/*:refs/remotes/origin/pr/*
+    git checkout -f ${GIT_COMMIT}
 fi
 
 # run command from args

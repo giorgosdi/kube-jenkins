@@ -65,25 +65,7 @@ jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
       <displayName></displayName>
     </com.coravy.hudson.plugins.github.GithubProjectProperty>
   </properties>
-  <scm class="hudson.plugins.git.GitSCM" plugin="git@3.9.1">
-    <configVersion>2</configVersion>
-    <userRemoteConfigs>
-      <hudson.plugins.git.UserRemoteConfig>
-        <name>origin</name>
-        <refspec>+refs/pull/*:refs/remotes/origin/pr/*</refspec>
-        <url>{git_ssh_url}</url>
-        <credentialsId>d989db42-79cf-4222-93e6-3a7301ead9cc</credentialsId>
-      </hudson.plugins.git.UserRemoteConfig>
-    </userRemoteConfigs>
-    <branches>
-      <hudson.plugins.git.BranchSpec>
-        <name>${{sha1}}</name>
-      </hudson.plugins.git.BranchSpec>
-    </branches>
-    <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
-    <submoduleCfg class="list"/>
-    <extensions/>
-  </scm>
+  {scm_config_snippet}
   <canRoam>true</canRoam>
   <disabled>false</disabled>
   <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
@@ -151,6 +133,32 @@ ghprb_trigger_template = """
     </org.jenkinsci.plugins.ghprb.GhprbTrigger>
 """
 
+git_scm_snippet = """
+  <scm class="hudson.plugins.git.GitSCM" plugin="git@3.9.1">
+    <configVersion>2</configVersion>
+    <userRemoteConfigs>
+      <hudson.plugins.git.UserRemoteConfig>
+        <name>origin</name>
+        <refspec>+refs/pull/*:refs/remotes/origin/pr/*</refspec>
+        <url>{git_ssh_url}</url>
+        <credentialsId>d989db42-79cf-4222-93e6-3a7301ead9cc</credentialsId>
+      </hudson.plugins.git.UserRemoteConfig>
+    </userRemoteConfigs>
+    <branches>
+      <hudson.plugins.git.BranchSpec>
+        <name>${{sha1}}</name>
+      </hudson.plugins.git.BranchSpec>
+    </branches>
+    <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+    <submoduleCfg class="list"/>
+    <extensions/>
+  </scm>
+"""
+
+null_scm_snippet = """
+  <scm class="hudson.scm.NullSCM"/>
+"""
+
 kubernetes_job_template = """---
 kind: Job
 apiVersion: batch/v1
@@ -210,6 +218,7 @@ class Job:
 
         self.ghprb_enabled = False
         self.ghprb_trigger_config = ""
+        self.scm_config_snippet = null_scm_snippet
         ghprb_config_state = job_dict['job'].get('ghprb', {}).get('enabled', '')
         if ghprb_config_state == "true":
             self.ghprb_enabled = True
@@ -218,6 +227,9 @@ class Job:
             self.ghprb_whitelisted_users = job_dict['job'].get('ghprb', {}).get('whitelisted_users', '')
             self.ghprb_whitelisted_orgs = job_dict['job'].get('ghprb', {}).get('whitelisted_orgs', '')
             self.ghprb_trigger_config = self.generate_ghprb_config()
+            self.scm_config_snippet = git_scm_snippet.format(
+                git_ssh_url=self.get_github_ssh_url()
+            )
 
         self.run_command = job_dict['job'].get('run_command')
         self.workdir = job_dict['job'].get('workdir')
@@ -248,7 +260,7 @@ class Job:
     def generate_jenkins_command(self):
         pre_commands = [
             "#!/bin/bash",
-            "echo GIT_COMMIT: \"${GIT_COMMIT}\"",
+            "echo [jenkins] GIT_COMMIT: \"${GIT_COMMIT}\"",
             "sed -i \"s/%REPLACE_TOKEN_GIT_COMMIT%/${{GIT_COMMIT}}/g\" {dir}{sep}{job_path}".format(
                 dir=self.job_directory,
                 sep=os.sep,
@@ -279,44 +291,45 @@ class Job:
             "   ((ATTEMPTS++))",
             "   kubectl logs -f jobs/{job_name} -n {ns}".format(job_name=self.formatted_name, ns=self.namespace),
             "   if [ $? -ne 0 ]; then",
-            "       echo \"Attempt: ${ATTEMPTS}/${MAX_ATTEMPTS}\"",
+            "       echo \"< Attempt: ${ATTEMPTS}/${MAX_ATTEMPTS}\"",
             "       sleep 3",
             "   else",
             "       break",
             "   fi",
             "done",
             "if [ ${ATTEMPTS} -ge ${MAX_ATTEMPTS} ]; then",
-            "    echo 'Maximum attempts reached when trying to show logs, showing job description'",
+            "    echo '[jenkins] Maximum attempts reached when trying to show logs, showing job description'",
             "    kubectl describe jobs/{job_name}".format(job_name=self.formatted_name),
-            "    echo 'Exiting with return code 2'",
+            "    echo '[jenkins] Exiting with return code 2'",
             "    exit 2",
             "fi",
+            "sleep 5 # wait for a short time for job status to update so return status is more accurate",
             "if [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.succeeded}}') ]]; then".format(
                 job_name=self.formatted_name,
                 ns=self.namespace,
             ),
-            "    echo 'Job succeeded, exiting with return code 0'",
+            "    echo '[jenkins] Job succeeded, exiting with return code 0'",
             "    exit 0",
             "elif [[ $(kubectl get jobs/{job_name} -n {ns} -o jsonpath='{{.status.failed}}') ]]; then".format(
                 job_name=self.formatted_name,
                 ns=self.namespace
             ),
-            "    echo 'Job failed, showing pod description'",
+            "    echo '[jenkins] Job failed, showing pod description'",
             "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(
                 job_name=self.formatted_name
             ),
-            "    echo \"Pod name: ${POD_NAME}\"",
+            "    echo \"[jenkins] Pod name: ${POD_NAME}\"",
             "    kubectl describe pod/${POD_NAME}",
-            "    echo 'Exiting with return code 1'",
+            "    echo '[jenkins] Exiting with return code 1'",
             "    exit 1",
             "else",
-            "    echo 'Unable to determine job status, showing pod description'",
+            "    echo '[jenkins] Unable to determine job status, showing pod description'",
             "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(
                 job_name=self.formatted_name
             ),
-            "    echo \"Pod name: ${POD_NAME}\"",
+            "    echo \"[jenkins] Pod name: ${POD_NAME}\"",
             "    kubectl describe pod/${POD_NAME}",
-            "    echo 'Exiting with return code 1 for safety'",
+            "    echo '[jenkins] Exiting with return code 1 for safety'",
             "    exit 1",
             "fi",
         ]
@@ -326,6 +339,7 @@ class Job:
         logging.debug("Generated Jenkins job spec for '{name}'".format(name=self.formatted_name))
         return jenkins_xml_template.format(
             jenkins_command=self.generate_jenkins_command(),
+            scm_config_snippet=self.scm_config_snippet,
             git_ssh_url=self.get_github_ssh_url(),
             git_https_url=self.get_github_https_url(),
             ghprb_trigger_config=self.ghprb_trigger_config,
