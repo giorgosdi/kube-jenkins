@@ -29,31 +29,6 @@ except FileNotFoundError:
 v1 = client.CoreV1Api()
 v1_batch = client.BatchV1Api()
 
-# jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
-# <project>
-#   <description></description>
-#   <keepDependencies>false</keepDependencies>
-#   <properties/>
-#   <scm class="hudson.scm.NullSCM"/>
-#   <canRoam>true</canRoam>
-#   <disabled>false</disabled>
-#   <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
-#   <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
-#   <triggers/>
-#   <concurrentBuild>false</concurrentBuild>
-#   <builders>
-#     <hudson.tasks.Shell>
-#       <command>{jenkins_command}</command>
-#     </hudson.tasks.Shell>
-#   </builders>
-#   <publishers/>
-#   <buildWrappers>
-#     <hudson.plugins.ansicolor.AnsiColorBuildWrapper plugin="ansicolor@0.5.2">
-#       <colorMapName>xterm</colorMapName>
-#     </hudson.plugins.ansicolor.AnsiColorBuildWrapper>
-#   </buildWrappers>
-# </project>"""
-
 jenkins_xml_template = """<?xml version='1.1' encoding='UTF-8'?>
 <project>
   <actions/>
@@ -291,7 +266,7 @@ class Job:
             "   ((ATTEMPTS++))",
             "   kubectl logs -f jobs/{job_name} -n {ns}".format(job_name=self.formatted_name, ns=self.namespace),
             "   if [ $? -ne 0 ]; then",
-            "       echo \"< Attempt: ${ATTEMPTS}/${MAX_ATTEMPTS}\"",
+            "       echo \"Attempt: ${ATTEMPTS}/${MAX_ATTEMPTS}\"",
             "       sleep 3",
             "   else",
             "       break",
@@ -323,14 +298,28 @@ class Job:
             "    echo '[jenkins] Exiting with return code 1'",
             "    exit 1",
             "else",
-            "    echo '[jenkins] Unable to determine job status, showing pod description'",
+            "    echo '[jenkins] Unable to determine job status, checking pod'",
             "    POD_NAME=$(kubectl get pods --selector job-name={job_name} -o json | jq -r '.items[0].metadata.name')".format(
                 job_name=self.formatted_name
             ),
             "    echo \"[jenkins] Pod name: ${POD_NAME}\"",
-            "    kubectl describe pod/${POD_NAME}",
-            "    echo '[jenkins] Exiting with return code 1 for safety'",
-            "    exit 1",
+            "    kubectl describe -n {ns} pod/${{POD_NAME}}".format(
+                ns=self.namespace,
+            ),
+            "    STATUS=$(kubectl describe -n {ns} pod/${{POD_NAME}} | grep 'Status:' | awk '{{print $2}}')".format(
+                ns=self.namespace,
+            ),
+            "    echo \"STATUS: ${STATUS}\"",
+            "    if [[ \"${STATUS}\" == \"Succeeded\" ]]; then",
+            "        echo '[jenkins] Pod succeeded, exiting with return code 0'",
+            "        exit 0",
+            "    elif [[ \"${STATUS}\" == \"Failed\" ]]; then",
+            "        echo '[jenkins] Pod failed, exiting with return code 1'",
+            "        exit 1",
+            "    else"
+            "        echo '[jenkins] Unable to determine job or pod status, exiting with return code 1 for safety'",
+            "        exit 1",
+            "    fi",
             "fi",
         ]
         return "\n".join(pre_commands + run_commands + post_commands)

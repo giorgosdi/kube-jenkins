@@ -54,6 +54,7 @@ allocation, running the jobs and pretty much everything else.
 - One job per ConfigMap, any more will be ignored
 - Job data YAML must be in a section called ```job.yaml```
 - ```ssh_secret_ref``` under the ```git``` section should be the name of a a secret already stored in kubernetes
+- If you want the Github pull request builder to register hooks and automatically build when your project's pull requests are updated, set ```enabled: "true"``` in the ```ghprb``` section
 
 ```yaml
 apiVersion: v1
@@ -74,6 +75,11 @@ data:
           url: "git@github.com:gravitational/helm-test.git"
           branch: "gravitational/k8s"
           ssh_secret_ref: "github-key"
+        ghprb:
+          enabled: "true"
+          admin_users: "webvictim"
+          whitelisted_users: "webvictim"
+          whitelisted_orgs: "gravitational"          
         aws_secret: "aws-key"        
         service_account_name: "gus-test-jenkins"        
         run_command: |
